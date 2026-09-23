@@ -1,0 +1,10 @@
+node_modules
+.local
+.git
+NOW/.git
+**/.next
+**/dist
+**/.expo
+test-results
+playwright-report
+.env*

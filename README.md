@@ -32,7 +32,7 @@ Para Expo:
 EXPO_PUBLIC_API_URL=http://IP-DE-TU-MAC:4000 ./scripts/runtime.sh npm run dev:mobile
 ```
 
-Para iOS nativo, abre [NOW.xcodeproj](/Users/josemoyacarrasco/Documents/Mios/Codex/Now/NOW/NOW.xcodeproj) y selecciona el esquema compartido `NOW`. Al pulsar Run, Xcode migra/siembra la base demo e inicia la API en `http://127.0.0.1:4000` de forma idempotente. El log queda en `.local/xcode-api.log`; `./scripts/xcode-stop-api.sh` la detiene. En un iPhone físico configura `NOW_API_URL` con la IP LAN o un dominio HTTPS. La URL de producción vive en Release y debe reemplazarse antes del archivo de App Store.
+Para iOS nativo, abre [NOW.xcodeproj](NOW/NOW.xcodeproj) y selecciona el esquema compartido `NOW`. Al pulsar Run, Xcode migra/siembra la base demo e inicia la API en `http://127.0.0.1:4000` de forma idempotente. El log queda en `.local/xcode-api.log`; `./scripts/xcode-stop-api.sh` la detiene. En un iPhone físico configura `NOW_API_URL` con la IP LAN o un dominio HTTPS. La URL de producción vive en Release y debe reemplazarse antes del archivo de App Store.
 
 ## Verificación
 
@@ -49,7 +49,7 @@ La suite cubre reglas puras del matching, seguridad de autenticación, CSRF, IDO
 
 ## Producción
 
-El servidor falla de forma segura si `NODE_ENV=production` y faltan PostgreSQL, Redis, SMTP o un secreto de al menos 32 caracteres. Copia `.env.example`, completa los proveedores y sigue [deployment.md](/Users/josemoyacarrasco/Documents/Mios/Codex/Now/docs/deployment.md). Las listas de publicación están en [app-store-readiness.md](/Users/josemoyacarrasco/Documents/Mios/Codex/Now/docs/app-store-readiness.md) y [play-store-readiness.md](/Users/josemoyacarrasco/Documents/Mios/Codex/Now/docs/play-store-readiness.md).
+El servidor falla de forma segura si `NODE_ENV=production` y faltan PostgreSQL, Redis, SMTP o un secreto de al menos 32 caracteres. Copia `.env.example`, completa los proveedores y sigue [deployment.md](docs/deployment.md). Las listas de publicación están en [app-store-readiness.md](docs/app-store-readiness.md) y [play-store-readiness.md](docs/play-store-readiness.md).
 
 ## Principios del producto
 
@@ -60,9 +60,9 @@ El servidor falla de forma segura si `NODE_ENV=production` y faltan PostgreSQL, 
 - Lugares públicos revisables, salida segura sin penalización, bloqueo y reporte contextual.
 - La métrica principal es `IRL Hours Created`, calculada con duración prevista y asistencia confirmada.
 
-Consulta [architecture.md](/Users/josemoyacarrasco/Documents/Mios/Codex/Now/docs/architecture.md), [matching-engine.md](/Users/josemoyacarrasco/Documents/Mios/Codex/Now/docs/matching-engine.md) y [privacy-and-safety.md](/Users/josemoyacarrasco/Documents/Mios/Codex/Now/docs/privacy-and-safety.md) para las decisiones operativas.
+Consulta [architecture.md](docs/architecture.md), [matching-engine.md](docs/matching-engine.md) y [privacy-and-safety.md](docs/privacy-and-safety.md) para las decisiones operativas.
 
-El estado y tratamiento de avisos transitivos está documentado en [security-audit.md](/Users/josemoyacarrasco/Documents/Mios/Codex/Now/docs/security-audit.md).
+El estado y tratamiento de avisos transitivos está documentado en [security-audit.md](docs/security-audit.md).
 
 
 ### Acceso social y avisos por intereses

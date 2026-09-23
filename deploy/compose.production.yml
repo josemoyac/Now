@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-now}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${POSTGRES_DB:-now}
+    volumes: ["postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-now}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?required}
+    volumes: ["redis:/data"]
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: unless-stopped
+    depends_on: [postgres, redis]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-now}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-now}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      AUTH_SECRET: ${AUTH_SECRET:?required}
+      SMTP_URL: ${SMTP_URL:?required}
+      MAIL_FROM: ${MAIL_FROM:?required}
+      APP_ORIGINS: ${APP_ORIGINS:?required}
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:?required}
+      DEMO_MODE: "false"
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:?required}
+      PRIVACY_EMAIL: ${PRIVACY_EMAIL:?required}
+    ports: ["127.0.0.1:4000:4000"]
+volumes:
+  postgres:
+  redis:

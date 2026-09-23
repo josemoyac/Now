@@ -1,0 +1,4 @@
+import 'dotenv/config';
+import {randomBytes} from 'node:crypto';
+export const env={demo:process.env.DEMO_MODE==='true',production:process.env.NODE_ENV==='production',port:Number(process.env.PORT||4000),host:process.env.HOST||'127.0.0.1',secret:process.env.AUTH_SECRET||(process.env.DEMO_MODE==='true'?'NOW-local-demo-only-not-a-production-secret':randomBytes(32).toString('hex')),origins:(process.env.APP_ORIGINS||'http://localhost:3000,http://localhost:3002,http://localhost:8081').split(','),web:process.env.PUBLIC_WEB_URL||'http://localhost:3000',demoAdminUser:process.env.DEMO_ADMIN_USER||'admin',demoAdminPassword:process.env.DEMO_ADMIN_PASSWORD||''};
+export function validateEnv(){if(env.production&&(env.demo||!process.env.AUTH_SECRET||process.env.AUTH_SECRET.length<32||!process.env.DATABASE_URL?.startsWith('postgres')||!process.env.REDIS_URL||!process.env.SMTP_URL))throw new Error('Production requires PostgreSQL, Redis, SMTP, AUTH_SECRET (32+) and DEMO_MODE=false');}

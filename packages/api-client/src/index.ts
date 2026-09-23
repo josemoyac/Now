@@ -1,0 +1,11 @@
+import { ApiError } from '../../types/src/index';
+export interface TokenStore{get():Promise<{accessToken:string;refreshToken:string}|null>;set(tokens:{accessToken:string;refreshToken:string}|null):Promise<void>}
+export class NowClient{
+ private refreshPromise:Promise<boolean>|null=null;
+ constructor(public base='',private store?:TokenStore){}
+ async request<T>(path:string,method='GET',body?:unknown,idempotencyKey?:string,retry=true):Promise<T>{const tokens=await this.store?.get();const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),15000);let r:Response;try{r=await fetch(this.base+path,{method,credentials:this.store?'omit':'include',headers:{...(body!==undefined?{'Content-Type':'application/json'}:{}),'X-Now-Client':this.store?'mobile':'web',...(tokens?{Authorization:'Bearer '+tokens.accessToken}:{}),...(idempotencyKey?{'Idempotency-Key':idempotencyKey}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{}),signal:controller.signal});}finally{clearTimeout(timeout);}if(r.status===401&&retry&&!path.startsWith('/v1/auth/')){if(!this.refreshPromise)this.refreshPromise=this.refresh().finally(()=>{this.refreshPromise=null;});if(await this.refreshPromise)return this.request<T>(path,method,body,idempotencyKey,false);}const data=await r.json();if(!r.ok)throw new ApiError(data.code||'REQUEST_FAILED',data.message||'No se pudo completar la operación.',r.status);return data as T;}
+ async refresh(){try{const t=await this.store?.get();const data=await this.request<{accessToken:string;refreshToken:string}>('/v1/auth/refresh','POST',t?{refreshToken:t.refreshToken}:{},undefined,false);if(this.store)await this.store.set(data);return true;}catch{if(this.store)await this.store.set(null);return false;}}
+ async login(path:string,body:unknown){const data=await this.request<{accessToken:string;refreshToken:string}>(path,'POST',body);if(this.store)await this.store.set(data);return data;}
+ async logout(){try{await this.request('/v1/auth/logout','POST',{});}finally{await this.store?.set(null);}}
+ mutation<T>(path:string,body:unknown={}){return this.request<T>(path,'POST',body,`${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`);}
+}

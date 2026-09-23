@@ -1,0 +1,11 @@
+import {spawn} from 'node:child_process';
+import {mkdtemp} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+const dir=await mkdtemp(join(tmpdir(),'now-e2e-'));
+const env={...process.env,NODE_ENV:'development',DEMO_MODE:'true',DATABASE_URL:'pglite://'+join(dir,'postgres'),PORT:'4100',HOST:'127.0.0.1',APP_ORIGINS:'http://localhost:3100,http://localhost:3102',API_INTERNAL_URL:'http://127.0.0.1:4100',NEXT_PUBLIC_API_WS_URL:'ws://localhost:4100/v1/realtime',NEXT_TELEMETRY_DISABLED:'1'};
+const children=[];
+const once=(file,args)=>new Promise((res,rej)=>{const p=spawn(process.execPath,[resolve(file),...args],{env,stdio:'inherit'});p.on('exit',code=>code===0?res():rej(new Error('startup failed')));});
+await once('node_modules/tsx/dist/cli.mjs',['db/migrate.ts']);await once('node_modules/tsx/dist/cli.mjs',['db/seed.ts']);
+for(const [file,args] of [['node_modules/tsx/dist/cli.mjs',['apps/api/src/main.ts']],['node_modules/next/dist/bin/next',['dev','apps/web','-p','3100']],['node_modules/next/dist/bin/next',['dev','apps/admin','-p','3102']]])children.push(spawn(process.execPath,[resolve(file),...args],{env,stdio:'inherit'}));
+const stop=()=>children.forEach(p=>p.kill('SIGTERM'));process.on('SIGINT',stop);process.on('SIGTERM',stop);

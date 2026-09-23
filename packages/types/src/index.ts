@@ -1,0 +1,26 @@
+import { z } from 'zod';
+export const visibilitySchema=z.enum(['friends','fof','community','open']);
+export type Visibility=z.infer<typeof visibilitySchema>;
+export const intentInput=z.object({activity:z.string().min(1).max(40),subtype:z.string().min(1).max(40),minutes:z.union([z.literal(30),z.literal(60),z.literal(90),z.literal(120),z.literal(240)]),startsIn:z.union([z.literal(0),z.literal(15),z.literal(30),z.literal(60)]).default(0),radius:z.number().int().min(1000).max(5000).default(2000),visibility:visibilitySchema,communityId:z.string().uuid().optional(),location:z.object({lat:z.number().min(-85).max(85),lon:z.number().min(-180).max(180)}),budget:z.number().int().min(0).max(3).default(1),accessible:z.boolean().default(false)});
+export type IntentInput=z.input<typeof intentInput>;
+export const reportCategories=['inappropriate','harassment','violence','discrimination','impersonation','spam','no_show','safety','underage','other'] as const;
+export const reportInput=z.object({subjectId:z.string().uuid(),matchId:z.string().uuid().optional(),messageId:z.string().uuid().optional(),category:z.enum(reportCategories),details:z.string().trim().min(5).max(2000)});
+export type MatchState='PROPOSAL_PENDING'|'PARTIALLY_ACCEPTED'|'CONFIRMED'|'EXPIRED'|'CANCELLED'|'COMPLETED'|'FAILED';
+export type ActivityOption={id:string;label:string;emoji:string};
+export type Activity={id:string;label:string;emoji:string;family:string;compatible:string[];options:ActivityOption[];enabled:boolean;minMinutes:number};
+export type UserView={id:string;displayName:string;username:string;avatar:string|null;avatarPending:boolean;country:string;ageStatus:string;trust:string;role:string;isDemo:boolean;reliability:{score:number;attended:number;accepted:number};preferences:Preferences;communities:{id:string;name:string;verified:boolean}[];consents:Record<string,boolean>};
+export type Preferences={notifications:boolean;liquidity:boolean;quietStart:number;quietEnd:number;timezone:string;radius:number;analytics:boolean;interests:string[];interestSubtypes:Record<string,string[]>;interestAlerts:boolean};
+export type VenueView={id:string;name:string;address:string;lat:number;lon:number;category:string;accessible:boolean;isDemo:boolean};
+export type MatchView={id:string;state:MatchState;activity:Activity;subtype:string|null;communityId:string|null;scheduledAt:string;endsAt:string;expiresAt:string;size:number;accepted:number;myResponse:string;distance:string;venue:VenueView|null;participants:{id:string;displayName:string;avatar:string|null;checkedIn:boolean}[];checkedIn:boolean;chatOpen:boolean;chatExpiresAt:string|null;isDemo:boolean};
+export type IntentView={id:string;activity:string;subtype:string|null;status:string;expiresAt:string;radius:number;visibility:Visibility};
+export type RadarView={intent:IntentView|null;signal:'quiet'|'forming'|'active';countBand:string;categories:{id:string;label:string;emoji:string;intensity:string}[];message:string;probability:number|null;estimatedMinutes:number|null;probabilityNote:string;match:MatchView|null};
+export type NotificationView={id:string;kind:string;title:string;body:string;read:boolean;createdAt:string};
+export type PersonSummary={id:string;displayName:string;avatar:string|null};
+export type PublicPersonProfile=PersonSummary&{sharedNows:number;friendStatus:'none'|'outgoing'|'incoming'|'friends'};
+export type DirectConversationView=PersonSummary&{lastMessage:string;lastMessageAt:string};
+export type AttendanceReviewView={id:string;matchId:string;subjectId:string;displayName:string;activity:{id:string;label:string;emoji:string};scheduledAt:string;otherReviewersNeeded:number};
+export type CommunityView={id:string;name:string;kind:string;city:string;description:string;method:string;joined:boolean;verified:boolean;memberCount:number;eventCount:number;metMembers:PersonSummary[];unmetCount:number};
+export type CommunityEventView={id:string;activity:Activity;subtype:string|null;scheduledAt:string;venue:string|null;attendeeCount:number;attendees:PersonSummary[]|null;attendedByMe:boolean};
+export type HistoryView={id:string;activity:Activity;subtype:string|null;scheduledAt:string;state:MatchState;community:{id:string;name:string}|null;participants:PersonSummary[];chatOpen:boolean;lastMessage:string|null};
+export type MessageView={id:string;senderId:string;displayName:string;body:string;createdAt:string;delivery?:'sent'|'received'|'read'};
+export class ApiError extends Error{constructor(public code:string,message:string,public status=400){super(message);this.name='ApiError';}}

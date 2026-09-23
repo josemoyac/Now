@@ -1,0 +1,1 @@
+export const tokens={colors:{paper:'#f7f8f4',ink:'#142720',muted:'#69756e',line:'#dce2d8',lime:'#d5fa58',forest:'#183f32',white:'#ffffff',danger:'#ab3e33'},radius:{card:24,button:16},brand:{name:'NOW',tagline:'Estoy libre. Abro NOW.'}} as const;

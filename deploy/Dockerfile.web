@@ -1,0 +1,11 @@
+FROM node:24-alpine AS build
+ARG APP=web
+ARG NEXT_PUBLIC_API_WS_URL
+ENV NEXT_PUBLIC_API_WS_URL=$NEXT_PUBLIC_API_WS_URL
+WORKDIR /app
+COPY package*.json ./
+COPY apps ./apps
+COPY packages ./packages
+RUN npm ci --ignore-scripts && npm run build:$APP
+ENV APP=$APP
+CMD ["sh", "-c", "./node_modules/.bin/next start apps/$APP -p ${PORT:-3000}"]
