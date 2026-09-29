@@ -4,7 +4,6 @@ import AuthenticationServices
 
 struct ContentView: View {
     @EnvironmentObject private var model: NOWModel
-    @State private var showInterests = false
     var body: some View {
         Group {
             if model.isRestoring { ProgressView("Preparando NOW…") }
@@ -12,9 +11,7 @@ struct ContentView: View {
             else { MainView() }
         }
         .preferredColorScheme(.light)
-        .task { await model.restore(); if model.user?.preferences.interests.isEmpty == true { showInterests = true } }
-        .onChange(of: model.user?.preferences.interests.isEmpty) { empty in if empty == true { showInterests = true } }
-        .sheet(isPresented: $showInterests) { InterestSetupScreen().interactiveDismissDisabled(model.user?.preferences.interests.isEmpty == true) }
+        .task { await model.restore() }
         .overlay(alignment: .top) { if let notice = model.latestInterestAlert { Text(notice + " · Abre NOW cuando te apetezca.").font(.subheadline.weight(.semibold)).padding(14).frame(maxWidth: .infinity).background(NOWTheme.soft).clipShape(RoundedRectangle(cornerRadius: 14)).padding(.horizontal, 18).padding(.top, 8).onTapGesture { model.latestInterestAlert = nil } } }
         .alert("NOW", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("Reintentar") { Task { await model.retryConnection() } }
@@ -31,7 +28,7 @@ private struct WelcomeView: View {
             Text("NOW.").font(.system(size: 38, weight: .black, design: .rounded)).foregroundStyle(NOWTheme.ink)
             Spacer(minLength: 18)
             Text("LA VIDA NO NECESITA TANTO PLAN").font(.caption2.bold()).tracking(1.8).foregroundStyle(NOWTheme.moss)
-            Text("Estoy libre.\nAbro NOW.").font(.system(size: 58, weight: .semibold, design: .rounded)).tracking(-3).foregroundStyle(NOWTheme.ink)
+            Text("Estoy libre.\nAbro NOW.").font(.largeTitle.weight(.semibold)).foregroundStyle(NOWTheme.ink)
             Text("Un café. Un paseo. Lo que surja.\nDi qué te apetece y encuentra a quienes también tienen un rato, ahora.").foregroundStyle(NOWTheme.muted).lineSpacing(5)
             if model.isDemo {
                 Button("Probar mi primer NOW ↗") { Task { await model.demoLogin() } }.buttonStyle(NOWPrimaryButton()).disabled(model.isBusy)
@@ -51,9 +48,13 @@ private struct LoginScreen: View {
     @State private var signup = true
     @State private var email = ""
     @State private var name = ""
-    @State private var birthDate = ""
+    @State private var birthDate = Calendar(identifier: .gregorian).date(byAdding: .year, value: -18, to: Date()) ?? Date()
+    @State private var hasChosenBirthDate = false
     @State private var terms = false
+    @State private var country = ""
     @State private var code = ""
+    private var latestAllowedBirthDate: Date { Calendar(identifier: .gregorian).date(byAdding: .year, value: -18, to: Date()) ?? Date() }
+    private var earliestAllowedBirthDate: Date { Calendar(identifier: .gregorian).date(byAdding: .year, value: -120, to: Date()) ?? Date.distantPast }
     var body: some View {
         NavigationStack { ScrollView { VStack(alignment: .leading, spacing: 16) {
             Text("Tu próximo NOW empieza aquí.").font(.largeTitle.bold())
@@ -63,28 +64,44 @@ private struct LoginScreen: View {
                 TextField("Código de seis cifras", text: $code).textContentType(.oneTimeCode).keyboardType(.numberPad).textFieldStyle(.roundedBorder)
                 Button("Entrar →") { Task { await model.verifyCode(code); if model.user != nil { dismiss() } } }.buttonStyle(NOWPrimaryButton()).disabled(code.count != 6 || model.isBusy)
             } else {
+                Picker("Acceso", selection: $signup) { Text("Crear cuenta").tag(true); Text("Ya tengo cuenta").tag(false) }.pickerStyle(.segmented)
                 if model.appleSignInEnabled {
                     SignInWithAppleButton(signup ? .signUp : .signIn, onRequest: { request in request.nonce = model.appleChallenge?.nonce }, onCompletion: { result in
                         switch result {
                         case .success(let authorization):
                             guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential, let data = credential.identityToken, let token = String(data: data, encoding: .utf8) else { model.error = "Apple no devolvió un token válido."; return }
-                            Task { await model.signInApple(token, name: signup ? name : nil, birthDate: signup ? birthDate : nil, terms: terms); if model.user != nil { dismiss() } }
+                            Task { await model.signInApple(token, name: signup ? name : nil, birthDate: signup ? birthDateISO(birthDate) : nil, country: signup ? country : nil, terms: terms); if model.user != nil { dismiss() } }
                         case .failure(let error): if (error as? ASAuthorizationError)?.code != .canceled { model.error = error.localizedDescription }
                         }
-                    }).signInWithAppleButtonStyle(.black).frame(height: 48).disabled(model.isBusy || model.appleChallenge == nil || (signup && (name.count < 2 || birthDate.isEmpty || !terms)))
+                    }).signInWithAppleButtonStyle(.black).frame(height: 48).disabled(model.isBusy || model.appleChallenge == nil || (signup && (name.trimmingCharacters(in: .whitespacesAndNewlines).count < 2 || !hasChosenBirthDate || country.isEmpty || !terms)))
+                    if signup { Text("Para crear una cuenta, completa nombre, elige una fecha de nacimiento válida (18+), elige país y acepta las normas de NOW. Para entrar con una cuenta existente, elige «Ya tengo cuenta».").font(.caption).foregroundStyle(NOWTheme.muted) }
                     Text("O continúa con tu email").font(.caption).foregroundStyle(NOWTheme.muted).frame(maxWidth: .infinity)
                 }
-                Picker("Acceso", selection: $signup) { Text("Crear cuenta").tag(true); Text("Ya tengo cuenta").tag(false) }.pickerStyle(.segmented)
                 TextField("Email", text: $email).textInputAutocapitalization(.never).keyboardType(.emailAddress).textContentType(.emailAddress).textFieldStyle(.roundedBorder)
                 if signup {
-                    TextField("Nombre visible", text: $name).textContentType(.givenName).textFieldStyle(.roundedBorder)
-                    TextField("Fecha de nacimiento (AAAA-MM-DD)", text: $birthDate).keyboardType(.numbersAndPunctuation).textFieldStyle(.roundedBorder)
-                    Toggle("Acepto las normas y he leído la privacidad", isOn: $terms).font(.callout)
-                    if let url = URL(string: model.privacyURL) { Link("Leer privacidad", destination: url) }
+                    TextField("Nombre visible", text: $name).textContentType(.name).textFieldStyle(.roundedBorder)
+                    DatePicker("Fecha de nacimiento", selection: Binding(get: { birthDate }, set: { birthDate = $0; hasChosenBirthDate = true }), in: earliestAllowedBirthDate...latestAllowedBirthDate, displayedComponents: .date)
+                    Picker("País de residencia", selection: $country) { Text("Elige tu país").tag(""); Text("España").tag("ES"); Text("Portugal").tag("PT"); Text("Francia").tag("FR"); Text("Alemania").tag("DE"); Text("Italia").tag("IT"); Text("Irlanda").tag("IE"); Text("Países Bajos").tag("NL"); Text("Bélgica").tag("BE"); Text("Austria").tag("AT") }
+                    Toggle("Acepto las normas de NOW", isOn: $terms).font(.callout)
+                    if let url = URL(string: model.privacyURL) { Link("Consultar política de privacidad", destination: url).font(.caption) }
                 }
-                Button("Recibir código →") { Task { await model.requestCode(email: email, name: signup ? name : nil, birthDate: signup ? birthDate : nil, terms: terms) } }.buttonStyle(NOWPrimaryButton()).disabled(email.isEmpty || (signup && (name.count < 2 || birthDate.isEmpty || !terms)) || model.isBusy)
+                Button("Recibir código →") { Task { await model.requestCode(email: email, name: signup ? name : nil, birthDate: signup ? birthDateISO(birthDate) : nil, country: signup ? country : nil, terms: terms, mode: signup ? "signup" : "login") } }.buttonStyle(NOWPrimaryButton()).disabled(email.isEmpty || (signup && (name.trimmingCharacters(in: .whitespacesAndNewlines).count < 2 || !hasChosenBirthDate || country.isEmpty || !terms)) || model.isBusy)
             }
         }.padding(24) }.navigationTitle("Entrar").toolbar { Button("Cerrar") { dismiss() } } }.task { await model.prepareAppleSignIn() }
+    }
+    private func birthDateISO(_ date: Date) -> String {
+        var localCalendar = Calendar(identifier: .gregorian)
+        localCalendar.timeZone = .current
+        let components = localCalendar.dateComponents([.year, .month, .day], from: date)
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(abbreviation: "GMT") ?? .current
+        let normalized = utcCalendar.date(from: components) ?? date
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = utcCalendar
+        formatter.timeZone = utcCalendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: normalized)
     }
 }
 
@@ -284,18 +301,45 @@ private struct PersonProfileScreen: View {
     let person: PersonSummary
     @State private var profile: PublicPersonProfile?
     @State private var draft = ""
+    @State private var reportDetails = ""
+    @State private var safetyNotice: String?
+    @State private var confirmBlock = false
     private var key: String { "direct-" + person.id }
+    private var sharedMatchId: String? { model.history.first(where: { $0.participants.contains(where: { $0.id == person.id }) })?.id }
     var body: some View {
         ScrollView { VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 14) { AvatarView(avatar: profile?.avatar ?? person.avatar, fallback: person.displayName, size: 64); VStack(alignment: .leading) { Text(profile?.displayName ?? person.displayName).font(.title2.bold()); Text("Habéis coincidido en \(profile?.sharedNows ?? 0) \((profile?.sharedNows ?? 0) == 1 ? "NOW" : "NOWs")").foregroundStyle(NOWTheme.muted) } }.nowCard()
             if let profile, profile.friendStatus == "friends" {
-                VStack(alignment: .leading, spacing: 10) { Text("Chat privado").font(.headline); ForEach(model.messages[key] ?? []) { message in VStack(alignment: .leading, spacing: 5) { if message.senderId != model.user?.id { Text(message.displayName).font(.caption.bold()).foregroundStyle(NOWTheme.moss) }; Text(message.body); if message.senderId == model.user?.id { Text(message.delivery == "read" ? "Leído" : message.delivery == "received" ? "Recibido" : "Enviado").font(.caption2).foregroundStyle(message.delivery == "read" ? .green : NOWTheme.moss) } }.padding(12).frame(maxWidth: .infinity, alignment: message.senderId == model.user?.id ? .trailing : .leading).background(message.senderId == model.user?.id ? Color.green.opacity(0.13) : NOWTheme.soft).clipShape(RoundedRectangle(cornerRadius: 14)) }; HStack { TextField("Escribe un mensaje", text: $draft).textFieldStyle(.roundedBorder); Button("Enviar") { let text = draft; draft = ""; Task { await model.sendDirectMessage(person.id, body: text) } }.disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } }.nowCard()
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Chat privado").font(.headline)
+                    ForEach(model.messages[key] ?? []) { message in
+                        VStack(alignment: .leading, spacing: 5) {
+                            if message.senderId != model.user?.id { Text(message.displayName).font(.caption.bold()).foregroundStyle(NOWTheme.moss) }
+                            Text(message.body)
+                            if message.senderId == model.user?.id { Text(message.delivery == "read" ? "Leído" : message.delivery == "received" ? "Recibido" : "Enviado").font(.caption2).foregroundStyle(message.delivery == "read" ? .green : NOWTheme.moss) }
+                            if message.senderId != model.user?.id {
+                                Button("Reportar este mensaje") { Task { await model.reportDirectMessage(person.id, message: message.id, details: reportDetails.isEmpty ? "Mensaje reportado desde el chat privado." : reportDetails); if model.error == nil { safetyNotice = "Gracias. Hemos recibido tu reporte." } } }.font(.caption)
+                            }
+                        }.padding(12).frame(maxWidth: .infinity, alignment: message.senderId == model.user?.id ? .trailing : .leading).background(message.senderId == model.user?.id ? Color.green.opacity(0.13) : NOWTheme.soft).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    HStack { TextField("Escribe un mensaje", text: $draft).textFieldStyle(.roundedBorder); Button("Enviar") { let text = draft; draft = ""; Task { await model.sendDirectMessage(person.id, body: text) } }.disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+                }.nowCard()
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Seguridad").font(.headline)
+                    if let sharedMatchId {
+                        TextField("Motivo del reporte", text: $reportDetails, axis: .vertical).lineLimit(2...4).textFieldStyle(.roundedBorder)
+                        Button("Reportar a esta persona") { Task { await model.report(person.id, match: sharedMatchId, details: reportDetails); if model.error == nil { safetyNotice = "Gracias. Hemos recibido tu reporte." } } }.buttonStyle(NOWSecondaryButton()).disabled(reportDetails.trimmingCharacters(in: .whitespacesAndNewlines).count < 5)
+                    } else { Text("Puedes reportar mensajes concretos desde el chat privado.").font(.caption).foregroundStyle(NOWTheme.muted) }
+                Button("Bloquear a esta persona", role: .destructive) { confirmBlock = true }.buttonStyle(NOWDangerButton())
+                }.nowCard()
             } else if profile?.friendStatus == "outgoing" { Text("Solicitud enviada. Podrás escribir cuando la acepte.").foregroundStyle(NOWTheme.muted).nowCard() }
             else if profile?.friendStatus == "incoming" { Button("Aceptar solicitud") { Task { await model.requestFriend(person.id); await load() } }.buttonStyle(NOWPrimaryButton()) }
             else { Button("Enviar solicitud de amistad") { Task { await model.requestFriend(person.id); await load() } }.buttonStyle(NOWPrimaryButton()) }
             Text("Solo mostramos su nombre y foto pública. El chat privado requiere que ambos aceptéis.").font(.caption).foregroundStyle(NOWTheme.muted)
             if let error = model.error { Text(error).foregroundStyle(.red) }
-        }.padding(20) }.background(NOWTheme.paper).navigationTitle("Perfil público").task { await load() }.task(id: profile?.friendStatus) { while !Task.isCancelled { if profile?.friendStatus == "friends" { await model.loadDirectMessages(person.id) }; try? await Task.sleep(for: .seconds(3)) } }
+        }.padding(20) }.background(NOWTheme.paper).navigationTitle("Perfil público").task { await model.loadProfile(); await load() }.task(id: profile?.friendStatus) { while !Task.isCancelled { if profile?.friendStatus == "friends" { await model.loadDirectMessages(person.id) }; try? await Task.sleep(for: .seconds(3)) } }
+            .confirmationDialog("Bloquear a \(profile?.displayName ?? person.displayName)?", isPresented: $confirmBlock, titleVisibility: .visible) { Button("Bloquear", role: .destructive) { Task { await model.block(person.id); safetyNotice = model.error == nil ? "Persona bloqueada." : nil } }; Button("Cancelar", role: .cancel) {} } message: { Text("No podréis contactar mientras el bloqueo esté activo.") }
+            .alert("Seguridad", isPresented: Binding(get: { safetyNotice != nil }, set: { if !$0 { safetyNotice = nil } })) { Button("Cerrar", role: .cancel) {} } message: { Text(safetyNotice ?? "") }
     }
     private func load() async { await model.loadPublicProfile(person.id); profile = model.publicProfiles[person.id]; if profile?.friendStatus == "friends" { await model.loadDirectMessages(person.id) } }
 }
@@ -309,6 +353,7 @@ private struct InterestSetupScreen: View {
     var body: some View {
         NavigationStack { ScrollView { VStack(alignment: .leading, spacing: 16) {
             Text("TU PERFIL · TUS PLANES").eyebrow(); Text("¿Qué te apetece hacer?").font(.largeTitle.bold())
+            Text("Es opcional. Puedes dejarlo para después y configurarlo cuando quieras desde Mi perfil.").font(.subheadline).foregroundStyle(NOWTheme.muted)
             Text("Elige tus intereses y, si quieres, te avisaremos cuando aparezca un NOW cercano que encaje. La zona aproximada caduca a las dos horas.").foregroundStyle(NOWTheme.muted)
             ForEach(model.activities.filter { $0.id != "surprise" }) { activity in
                 VStack(alignment: .leading, spacing: 10) {
@@ -319,9 +364,9 @@ private struct InterestSetupScreen: View {
             Toggle("Avisarme de NOWs cercanos", isOn: $alerts).nowCard()
             if alerts && model.location.coordinate == nil { Button("Activar zona aproximada") { Task { _ = await model.requestLocation() } }.buttonStyle(NOWSecondaryButton()) }
             Text("El aviso no revela quién creó el NOW ni tu ubicación exacta.").font(.caption).foregroundStyle(NOWTheme.muted)
-            Button("Guardar intereses →") { Task { await model.saveInterests(Array(selected), subtypes: subtypes, alerts: alerts); if model.error == nil { dismiss() } } }.buttonStyle(NOWPrimaryButton()).disabled(selected.isEmpty || model.isBusy)
+            Button("Guardar intereses →") { Task { await model.saveInterests(Array(selected), subtypes: subtypes, alerts: alerts); if model.error == nil { dismiss() } } }.buttonStyle(NOWPrimaryButton()).disabled(model.isBusy)
             if let error = model.error { Text(error).foregroundStyle(.red) }
-        }.padding(20) }.background(NOWTheme.paper).navigationTitle("Tus intereses").toolbar { if !((model.user?.preferences.interests.isEmpty) ?? true) { Button("Cerrar") { dismiss() } } } }
+        }.padding(20) }.background(NOWTheme.paper).navigationTitle("Tus intereses").toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Ahora no") { dismiss() } } } }
         .onAppear { selected = Set(model.user?.preferences.interests ?? []); subtypes = model.user?.preferences.interestSubtypes ?? [:]; alerts = model.user?.preferences.interestAlerts ?? false }
     }
 }
@@ -444,6 +489,7 @@ private struct TypingDots: View {
 private struct PrivacyScreen: View {
     @EnvironmentObject private var model: NOWModel
     @State private var deleteText = ""
+    @State private var confirmDelete = false
     var body: some View {
         ScrollView { VStack(alignment: .leading, spacing: 18) {
             Text("TÚ DECIDES").eyebrow(); Text("Tu espacio. Tus límites.").font(.largeTitle.bold())
@@ -462,7 +508,11 @@ private struct PrivacyScreen: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Tu cuenta").font(.title2.bold()); Button("Cerrar sesión") { Task { await model.logout() } }.buttonStyle(NOWSecondaryButton())
                 SecureField("Escribe ELIMINAR para borrar", text: $deleteText).textFieldStyle(.roundedBorder)
-                Button("Eliminar mi cuenta") { Task { await model.deleteAccount() } }.buttonStyle(NOWDangerButton()).disabled(deleteText != "ELIMINAR")
+                Button("Eliminar mi cuenta") { confirmDelete = true }.buttonStyle(NOWDangerButton()).disabled(deleteText != "ELIMINAR")
+                    .confirmationDialog("Eliminar definitivamente tu cuenta", isPresented: $confirmDelete, titleVisibility: .visible) {
+                        Button("Eliminar cuenta", role: .destructive) { Task { await model.deleteAccount() } }
+                        Button("Cancelar", role: .cancel) {}
+                    } message: { Text("Se borrarán tu perfil y tus datos asociados. Se cerrará tu sesión y no podrás recuperar la cuenta.") }
             }.nowCard()
         }.padding(20) }.background(NOWTheme.paper).navigationTitle("Privacidad")
     }
@@ -472,8 +522,12 @@ private struct LocationConsent: View {
     @EnvironmentObject private var model: NOWModel; @Environment(\.dismiss) private var dismiss; let ready: () -> Void
     var body: some View { VStack(spacing: 22) {
         Image(systemName: "location.circle.fill").font(.system(size: 62)).foregroundStyle(NOWTheme.moss); Text("Cerca, sin localizarte.").font(.title.bold())
-        Text("Usamos tu ubicación solo al activar el radar. Se redondea y se elimina al terminar. Nadie verá dónde estás.").foregroundStyle(NOWTheme.muted).multilineTextAlignment(.center)
+        Text("Al activar el radar, la app envía tus coordenadas al servidor para buscar NOWs cercanos. El servidor reduce su precisión y elimina la ubicación al terminar. No usamos ubicación en segundo plano.").foregroundStyle(NOWTheme.muted).multilineTextAlignment(.center)
         Button("Usar mi ubicación →") { Task { if await model.requestLocation() { ready(); dismiss() } } }.buttonStyle(NOWPrimaryButton())
+        if model.location.isDenied {
+            Text("El permiso está desactivado. Puedes cambiarlo en Ajustes del iPhone.").font(.caption).foregroundStyle(NOWTheme.muted).multilineTextAlignment(.center)
+            Button("Abrir Ajustes") { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }.buttonStyle(NOWSecondaryButton())
+        }
         if model.isDemo { Button("Usar campus de demostración") { model.location.useDemoCampus(); ready(); dismiss() }.buttonStyle(NOWSecondaryButton()) }
         Text("Sin ubicación en segundo plano. Sin historial.").font(.caption).foregroundStyle(NOWTheme.muted)
     }.padding(28).presentationDetents([.medium]) }

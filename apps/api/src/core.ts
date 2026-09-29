@@ -9,6 +9,7 @@ import { activityOptions,defaultPreferences } from '../../../db/seed';
 export const ms=(n:unknown)=>Number(n);
 export const iso=(n:unknown)=>new Date(Number(n)).toISOString();
 export function requireValue<T>(v:T|null|undefined,code='NOT_FOUND',message='No encontramos lo que buscas.'):T{if(v===null||v===undefined)throw new ApiError(code,message,404);return v;}
+export async function hasCurrentLocationConsent(q:Query,uid:string){const row=await q.one<{granted:boolean}>('SELECT granted FROM consents WHERE user_id=$1 AND purpose=$2 ORDER BY created_at DESC,id DESC LIMIT 1',[uid,'location']);return row?.granted===true;}
 export async function active(q:Query,uid:string){const u=requireValue(await q.one<User>('SELECT * FROM users WHERE id=$1',[uid]));if(u.status!=='active'||!u.over18)throw new ApiError('NOT_ELIGIBLE','Tu cuenta no puede usar el radar. Revisa tu estado en el perfil.',403);return u;}
 export async function audit(q:Query,actor:string|null,action:string,subject:string|null=null,metadata:Record<string,unknown>={}){await q.exec('INSERT INTO audit_events VALUES($1,$2,$3,$4,$5::jsonb,$6)',[id(),actor,action,subject,JSON.stringify(metadata),Date.now()]);}
 export async function metric(q:Query,name:string,activity:string|null=null,community:string|null=null,value=1){await q.exec('INSERT INTO analytics_events(id,name,activity,community_id,city,value,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[id(),name,activity,community,'Sevilla',value,Date.now()]);}

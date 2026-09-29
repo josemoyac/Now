@@ -47,21 +47,22 @@ actor NOWClient {
     func readMessages(_ id: String) async throws { let _: APIEmpty = try await request("/v1/matches/\(id)/messages/read", method: "POST", body: [String:String]()) }
     func sendMessage(_ id: String, body: String) async throws { let _: [String:String] = try await request("/v1/matches/\(id)/messages", method: "POST", body: ["body":body]) }
     func report(_ person: String, match: String, details: String) async throws { let _: [String:String] = try await request("/v1/reports", method: "POST", body: ["subjectId":person,"matchId":match,"category":"safety","details":details], idempotency: true) }
+    func reportDirectMessage(_ person: String, message: String, details: String) async throws { let _: [String:String] = try await request("/v1/reports", method: "POST", body: ["subjectId":person,"directMessageId":message,"category":"safety","details":details], idempotency: true) }
     func block(_ person: String) async throws { let _: APIEmpty = try await request("/v1/users/\(person)/block", method: "POST", body: [String:String]()) }
     func avatar(_ image: String?) async throws -> UserView { try await request("/v1/me/avatar", method: "PUT", body: ["image":image as Any? ?? NSNull()]) }
     func updateName(_ name: String) async throws -> UserView { try await request("/v1/me", method: "PATCH", body: ["displayName":name]) }
 
     func oidcNonce(_ provider: String) async throws -> OIDCChallenge { try await request("/v1/auth/oidc/nonce", method: "POST", body: ["provider":provider], authenticated: false) }
-    func oidcLogin(_ provider: String, token: String, nonce: OIDCChallenge, displayName: String?, birthDate: String?, terms: Bool) async throws -> UserView {
+    func oidcLogin(_ provider: String, token: String, nonce: OIDCChallenge, displayName: String?, birthDate: String?, country: String?, terms: Bool) async throws -> UserView {
         var body: [String:Any] = ["provider":provider,"idToken":token,"nonce":nonce.nonce,"challenge":nonce.challenge,"binding":nonce.binding]
-        if let displayName, let birthDate { body["displayName"] = displayName; body["birthDate"] = birthDate; body["terms"] = terms }
+        if let displayName, let birthDate, let country { body["displayName"] = displayName; body["birthDate"] = birthDate; body["country"] = country; body["terms"] = terms }
         let result: AuthResponse = try await request("/v1/auth/oidc", method: "POST", body: body, authenticated: false)
         tokens = Tokens(access: result.accessToken, refresh: result.refreshToken); KeychainStore.save(tokens!); return result.user
     }
 
-    func requestCode(email: String, displayName: String?, birthDate: String?, terms: Bool) async throws -> AuthChallenge {
-        var body: [String:Any] = ["email":email]
-        if let displayName, let birthDate { body["displayName"] = displayName; body["birthDate"] = birthDate; body["terms"] = terms }
+    func requestCode(email: String, displayName: String?, birthDate: String?, country: String?, terms: Bool, mode: String) async throws -> AuthChallenge {
+        var body: [String:Any] = ["email":email,"mode":mode]
+        if let displayName, let birthDate, let country { body["displayName"] = displayName; body["birthDate"] = birthDate; body["country"] = country; body["terms"] = terms }
         return try await request("/v1/auth/request", method: "POST", body: body, authenticated: false)
     }
 

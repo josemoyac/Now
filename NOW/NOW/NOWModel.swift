@@ -50,9 +50,9 @@ import CoreLocation
     func retryConnection() async { isRestoring = true; error = nil; await restore() }
 
     func demoLogin() async { await run { user = try await client.demoLogin(); await refreshRadar(); startPolling() } }
-    func requestCode(email: String, name: String?, birthDate: String?, terms: Bool) async { await run { challenge = try await client.requestCode(email: email, displayName: name, birthDate: birthDate, terms: terms) } }
+    func requestCode(email: String, name: String?, birthDate: String?, country: String?, terms: Bool, mode: String) async { await run { challenge = try await client.requestCode(email: email, displayName: name, birthDate: birthDate, country: country, terms: terms, mode: mode) } }
     func prepareAppleSignIn() async { guard appleSignInEnabled else { return }; await run { appleChallenge = try await client.oidcNonce("apple") } }
-    func signInApple(_ token: String, name: String?, birthDate: String?, terms: Bool) async { guard let appleChallenge else { error = "Prepara de nuevo el acceso con Apple."; return }; await run { user = try await client.oidcLogin("apple", token: token, nonce: appleChallenge, displayName: name, birthDate: birthDate, terms: terms); self.appleChallenge = nil; challenge = nil; await refreshRadar(); startPolling() } }
+    func signInApple(_ token: String, name: String?, birthDate: String?, country: String?, terms: Bool) async { guard let appleChallenge else { error = "Prepara de nuevo el acceso con Apple."; return }; await run { user = try await client.oidcLogin("apple", token: token, nonce: appleChallenge, displayName: name, birthDate: birthDate, country: country, terms: terms); self.appleChallenge = nil; challenge = nil; await refreshRadar(); startPolling() } }
     func verifyCode(_ code: String) async { guard let challenge else { return }; await run { user = try await client.verifyCode(challenge, code: code); self.challenge = nil; await refreshRadar(); startPolling() } }
     func refreshRadar() async { guard user != nil else { return }; do { radar = try await client.radar(); let notes = try await client.notifications(); if !didLoadNotifications { knownNotificationIds = Set(notes.map(\.id)); didLoadNotifications = true } else { if let fresh = notes.first(where: { $0.kind == "interest" && !knownNotificationIds.contains($0.id) }) { latestInterestAlert = fresh.title }; knownNotificationIds.formUnion(notes.map(\.id)) } } catch { self.error = error.localizedDescription } }
     func loadCommunities() async { await run { communities = try await client.communities() } }
@@ -79,6 +79,7 @@ import CoreLocation
     func declineFriendRequest(_ id: String) async { await run { try await client.declineFriendRequest(id); friendRequests = try await client.friendRequests() } }
     func loadPublicProfile(_ id: String) async { await run { publicProfiles[id] = try await client.publicPerson(id) } }
     func report(_ person: String, match: String, details: String) async { await run { try await client.report(person, match: match, details: details) } }
+    func reportDirectMessage(_ person: String, message: String, details: String) async { await run { try await client.reportDirectMessage(person, message: message, details: details) } }
     func block(_ person: String) async { await run { try await client.block(person); await refreshRadar() } }
     func updateName(_ name: String) async { await run { user = try await client.updateName(name) } }
     func updateAvatar(_ data: Data) async {
@@ -96,7 +97,7 @@ import CoreLocation
     }
     func removeAvatar() async { await run { user = try await client.avatar(nil) } }
     func join(_ id: String, code: String) async { await run { try await client.join(id, code: code); communities = try await client.communities(); user = try await client.me() } }
-    func requestLocation() async -> Bool { do { let granted = try await location.request(); if granted { try await client.consentLocation(true) }; return granted } catch { self.error = error.localizedDescription; return false } }
+    func requestLocation() async -> Bool { do { let granted = try await location.request(); if granted { try await client.consentLocation(true) }; return granted } catch is CancellationError { return false } catch { self.error = error.localizedDescription; return false } }
 
     func createIntent(activity: String, subtype: String, minutes: Int, radius: Int, visibility: String) async {
         guard let coordinate = location.coordinate else { error = "Activa la ubicación para entrar en el radar."; return }
@@ -128,25 +129,61 @@ import CoreLocation
 
     private func reset() { knownNotificationIds.removeAll(); didLoadNotifications = false; latestInterestAlert = nil; refreshTask?.cancel(); refreshTask = nil; user = nil; radar = nil; challenge = nil; history = []; conversations = []; directConversations = []; attendanceReviews = []; people = []; messages = [:]; location.clear() }
     private func startPolling() { refreshTask?.cancel(); refreshTask = Task { while !Task.isCancelled { try? await Task.sleep(for: .seconds(5)); await refreshRadar() } } }
-    private func run(_ operation: () async throws -> Void) async { isBusy = true; defer { isBusy = false }; do { try await operation() } catch { self.error = error.localizedDescription } }
+    private func run(_ operation: () async throws -> Void) async { isBusy = true; error = nil; defer { isBusy = false }; do { try await operation() } catch { self.error = error.localizedDescription } }
 }
 
 @MainActor final class NOWLocation: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     @Published private(set) var coordinate: CLLocationCoordinate2D?
     private let manager = CLLocationManager()
     private var continuation: CheckedContinuation<Bool,Error>?
+    private var timeoutTask: Task<Void,Never>?
+    var isDenied: Bool { manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted }
 
     override init() { super.init(); manager.delegate = self; manager.desiredAccuracy = kCLLocationAccuracyHundredMeters }
     func request() async throws -> Bool {
-        if let coordinate = manager.location?.coordinate { self.coordinate = coordinate; return true }
-        manager.requestWhenInUseAuthorization(); manager.requestLocation()
-        return try await withCheckedThrowingContinuation { continuation = $0 }
+        switch manager.authorizationStatus {
+        case .denied, .restricted: throw NOWClientError.message("La ubicación está desactivada. Puedes permitirla en Ajustes.")
+        case .authorizedAlways, .authorizedWhenInUse:
+            if let location = manager.location, Date().timeIntervalSince(location.timestamp) < 120 { coordinate = location.coordinate; return true }
+        default: break
+        }
+        guard continuation == nil else { throw NOWClientError.message("Ya hay una solicitud de ubicación en curso.") }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { pending in
+                continuation = pending
+                timeoutTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(20))
+                    guard !Task.isCancelled else { return }
+                    self?.finish(.failure(NOWClientError.message("No recibimos tu ubicación. Comprueba los permisos e inténtalo de nuevo.")))
+                }
+                switch manager.authorizationStatus {
+                case .authorizedAlways, .authorizedWhenInUse: manager.requestLocation()
+                case .notDetermined: manager.requestWhenInUseAuthorization()
+                case .denied, .restricted: finish(.failure(NOWClientError.message("La ubicación está desactivada. Puedes permitirla en Ajustes.")))
+                @unknown default: finish(.failure(NOWClientError.message("No pudimos comprobar el permiso de ubicación.")))
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.finish(.failure(CancellationError())) }
+        }
     }
     func useDemoCampus() { coordinate = .init(latitude: 37.36, longitude: -5.985) }
-    func clear() { coordinate = nil; manager.stopUpdatingLocation() }
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) { coordinate = locations.last?.coordinate; continuation?.resume(returning: coordinate != nil); continuation = nil }
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { continuation?.resume(throwing: error); continuation = nil }
+    func clear() { coordinate = nil; manager.stopUpdatingLocation(); finish(.failure(CancellationError())) }
+    private func finish(_ result: Result<Bool,Error>) {
+        guard let continuation else { return }
+        self.continuation = nil; timeoutTask?.cancel(); timeoutTask = nil
+        continuation.resume(with: result)
+    }
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let coordinate = locations.last?.coordinate else { return }
+        self.coordinate = coordinate; finish(.success(true))
+    }
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { finish(.failure(error)) }
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        if manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted { continuation?.resume(throwing: NOWClientError.message("Puedes habilitar la ubicación en Ajustes.")); continuation = nil }
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse: if continuation != nil { manager.requestLocation() }
+        case .denied, .restricted: finish(.failure(NOWClientError.message("La ubicación está desactivada. Puedes permitirla en Ajustes.")))
+        default: break
+        }
     }
 }
